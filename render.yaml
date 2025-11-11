@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: foodlog-backend
+    env: docker
+    plan: starter
+    autoDeploy: true
+    envVars:
+      - key: STORAGE_BACKEND
+        value: sqlite
+      - key: ML_SERVICE_URL
+        value: stub
+      - key: ML_SERVICE_API_KEY
+        value: ""
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: HF_API_TOKEN
+        sync: false
+      - key: HF_SPACE_URL
+        value: https://huggingface.co/spaces/AnitaAnita2025/nateraw-food/+/api/predict/
+      - key: HF_CONFIDENCE_THRESHOLD
+        value: "0.5"
+      - key: HF_SPACE_TIMEOUT
+        value: "45"
+      - key: UPLOADS_DIR
+        value: /data/uploads
+      - key: SQLITE_DB_PATH
+        value: /data/db/food_history.db
+    disk:
+      name: persistent-data
+      mountPath: /data
+      sizeGB: 1

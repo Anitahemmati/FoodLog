@@ -1,0 +1,336 @@
+openapi: 3.0.3
+info:
+  title: Food Log Backend API
+  description: |
+    REST API for the Food Log application. The service accepts meal photo uploads,
+    predicts nutrition information, and persists meal history in DynamoDB or SQLite.
+  version: 1.0.0
+servers:
+  - url: https://api.foodlog.example.com
+    description: Production
+  - url: http://localhost:5000
+    description: Local development
+tags:
+  - name: Authentication
+  - name: Predictions
+  - name: History
+  - name: Health
+paths:
+  /predict:
+    post:
+      tags: [Predictions]
+      summary: Upload a meal photo and receive nutrition predictions
+      operationId: uploadMealPhoto
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: Image file of the meal. The field may also be named `image`.
+                meal_date:
+                  type: string
+                  format: date-time
+                  description: >
+                    Optional ISO-8601 timestamp (or yyyy-mm-dd date) representing when the meal was
+                    consumed. Defaults to the upload time if omitted.
+              required:
+                - photo
+      responses:
+        "200":
+          description: Prediction generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PredictionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Missing or invalid token (optional token accepted but invalid tokens are rejected)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Image classified but the top result is below the configured confidence threshold.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LowConfidenceResponse"
+        "500":
+          $ref: "#/components/responses/ServerError"
+  /auth/signup:
+    post:
+      tags: [Authentication]
+      summary: Register a new user
+      operationId: signUp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRequest"
+      responses:
+        "201":
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate an existing user
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRequest"
+      responses:
+        "200":
+          description: Login succeeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Fetch details for the authenticated user
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User details returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /history:
+    get:
+      tags: [History]
+      summary: List stored meal predictions
+      operationId: listHistory
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: History retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/StoredMeal"
+                  message:
+                    type: string
+                    description: Present only when the history is empty.
+                    example: history empty
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /health:
+    get:
+      tags: [Health]
+      summary: Health-check endpoint
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    AuthRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          example: S3curePass!
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT for subsequent authenticated requests.
+        user:
+          $ref: "#/components/schemas/User"
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        created_at:
+          type: string
+          format: date-time
+    PredictionResponse:
+      type: object
+      properties:
+        image_url:
+          type: string
+          format: uri
+        food:
+          type: string
+        calories:
+          type: integer
+          example: 420
+        ingredients:
+          type: array
+          items:
+            type: string
+        nutrition_facts:
+          $ref: "#/components/schemas/NutritionFacts"
+        metadata:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+        consumed_at:
+          type: string
+          format: date-time
+          description: Timestamp representing when the meal was consumed.
+        inference_source:
+          type: string
+          description: Indicates whether the Hugging Face space, remote ML service, or local fallback produced the result.
+        ml_service_error:
+          type: string
+          description: Populated when the remote ML service call fails.
+      description: >
+        When the Hugging Face classifier succeeds, metadata contains an `hf_space` object with `label`, `confidence`,
+        `threshold`, and optional timing diagnostics. When it fails, `metadata.hf_space_error` captures the reason.
+    StoredMeal:
+      allOf:
+        - $ref: "#/components/schemas/PredictionResponse"
+        - type: object
+          properties:
+            id:
+              type: string
+              description: Unique identifier for the stored record.
+            user_id:
+              type: string
+              description: Identifier of the user that created the record.
+    NutritionFacts:
+      type: object
+      properties:
+        calories:
+          type: integer
+        carbohydrates:
+          type: integer
+        proteins:
+          type: integer
+        fats:
+          type: integer
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+          nullable: true
+    LowConfidenceResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: این غذا نیست
+        details:
+          type: string
+          example: بالاترین اطمینان 48.5% برای pizza
+        label:
+          type: string
+          description: Highest-ranked label returned by the classifier.
+        confidence:
+          type: number
+          format: float
+          description: Confidence expressed as a ratio between 0 and 1.
+          example: 0.485
+        threshold:
+          type: number
+          format: float
+          description: Active confidence threshold (ratio between 0 and 1).
+          example: 0.5
+  responses:
+    BadRequest:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ServerError:
+      description: Unexpected error occurred
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

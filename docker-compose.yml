@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  backend:
+    build: .
+    image: foodlog-backend:latest
+    ports:
+      - "5000:5000"
+    environment:
+      STORAGE_BACKEND: sqlite
+      ML_SERVICE_URL: ""
+      ML_SERVICE_API_KEY: ""
+    volumes:
+      - ./uploads:/app/uploads
+      - ./tmp:/app/tmp
+    restart: unless-stopped
