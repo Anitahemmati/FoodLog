@@ -19,8 +19,8 @@ Environment variables Render uses (from `render.yaml`):
 - `ML_SERVICE_URL=stub` while the real ML service is unavailable.
 - `ML_SERVICE_API_KEY` (leave empty unless needed).
 - `JWT_SECRET_KEY` – set this in the Render dashboard (use `openssl rand -hex 32` locally to generate a strong value).
-- `HF_API_TOKEN` – required. Paste your Hugging Face token (e.g., `hf_zLQ...`) in Render → **Environment** so the backend can call the classifier.
-- `HF_SPACE_URL=https://huggingface.co/spaces/AnitaAnita2025/nateraw-food/+/api/predict/` – adjust if you point to a different space or switch back to the nateraw endpoint.
+- `HF_API_TOKEN` – required. Paste your Hugging Face token (e.g., `hf_zLQ...`) in Render → **Environment** so the backend can call the classifier via the official Inference API.
+- `HF_SPACE_URL=https://api-inference.huggingface.co/models/nateraw/food` – adjust if you point to a different hosted model or run your own Space/endpoint.
 - `HF_CONFIDENCE_THRESHOLD=0.5` – tweak if you want to require higher or lower confidence before accepting a prediction (expressed as a ratio, so 0.5 = 50 %).
 - `HF_SPACE_TIMEOUT=45` – network timeout (seconds) for the Hugging Face request.
 - TensorFlow and the training utilities are optional; runtime predictions now use synthetic data so the container no longer ships heavy ML dependencies. If you need to retrain models locally, install `tensorflow` manually before running `train_model.py`.
@@ -48,12 +48,12 @@ curl -X POST https://<your-render-subdomain>.onrender.com/auth/signup \
   -d '{"email":"demo@foodlog.app","password":"Str0ngPass!"}'
 ```
 
-For predictions, call `/predict` with `multipart/form-data`. The response uses the stubbed ML output until a real service is configured.
+For predictions, call `/predict` with `multipart/form-data`. The backend now sends the raw image to Hugging Face’s inference API (so you get consistent labels/confidence as long as `HF_API_TOKEN` is set) while the nutrition macro fields stay synthetic until the dedicated ML microservice is ready.
 
 ## 5. Frontend configuration
 Update the frontend API base URL to the Render hostname (e.g., `https://foodlog-backend.onrender.com`). Once committed and pushed, redeploy the frontend in Vercel so both services point at the same backend.
 
 ## 6. Next steps
 - When the ML microservice is ready, update `ML_SERVICE_URL` (and optionally `ML_SERVICE_API_KEY`) in Render → **Environment** and trigger a redeploy.
-- If the Hugging Face Space token rotates, edit `HF_API_TOKEN` in Render and hit **Manual Deploy → Deploy latest commit** to roll out the new secret.
+- If the Hugging Face token rotates, edit `HF_API_TOKEN` in Render and hit **Manual Deploy → Deploy latest commit** to roll out the new secret.
 - If you later migrate to AWS or another provider, remove `render.yaml` or keep both deployment options side by side.

@@ -20,7 +20,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
@@ -49,7 +49,7 @@ USE_AWS_BACKEND = STORAGE_BACKEND == "aws"
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "change-me")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_MINUTES = int(os.environ.get("JWT_EXPIRATION_MINUTES", "60"))
-DEFAULT_HF_SPACE_URL = "https://huggingface.co/spaces/AnitaAnita2025/nateraw-food/+/api/predict/"
+DEFAULT_HF_SPACE_URL = "https://api-inference.huggingface.co/models/nateraw/food"
 
 
 def _safe_float(value: Optional[str], default: float) -> float:
@@ -147,14 +147,33 @@ def _call_hf_food_space(image_bytes: bytes) -> Tuple[str, float, Dict[str, Any]]
   if not HF_SPACE_URL:
     raise HuggingFaceSpaceError("Hugging Face space URL is not configured.")
 
-  encoded = base64.b64encode(image_bytes).decode("utf-8")
-  payload = {"data": [f"data:image/jpeg;base64,{encoded}"]}
-  headers = {"Content-Type": "application/json"}
+  parsed_url = urlparse(HF_SPACE_URL)
+  is_inference_endpoint = "api-inference.huggingface.co" in parsed_url.netloc
+
+  headers = {}
   if HF_API_TOKEN:
     headers["Authorization"] = f"Bearer {HF_API_TOKEN}"
 
   try:
-    response = requests.post(HF_SPACE_URL, headers=headers, json=payload, timeout=HF_SPACE_TIMEOUT)
+    if is_inference_endpoint:
+      headers.setdefault("Accept", "application/json")
+      headers.setdefault("Content-Type", "application/octet-stream")
+      response = requests.post(
+        HF_SPACE_URL,
+        headers=headers,
+        data=image_bytes,
+        timeout=HF_SPACE_TIMEOUT,
+      )
+    else:
+      encoded = base64.b64encode(image_bytes).decode("utf-8")
+      payload = {"data": [f"data:image/jpeg;base64,{encoded}"]}
+      headers["Content-Type"] = "application/json"
+      response = requests.post(
+        HF_SPACE_URL,
+        headers=headers,
+        json=payload,
+        timeout=HF_SPACE_TIMEOUT,
+      )
   except requests.RequestException as exc:
     raise HuggingFaceSpaceError(f"Hugging Face request failed: {exc}") from exc
 
@@ -166,6 +185,9 @@ def _call_hf_food_space(image_bytes: bytes) -> Tuple[str, float, Dict[str, Any]]
     parsed = response.json()
   except ValueError as exc:
     raise HuggingFaceSpaceError("Hugging Face space response was not JSON.") from exc
+
+  if isinstance(parsed, dict) and parsed.get("error"):
+    raise HuggingFaceSpaceError(f"Hugging Face space error: {parsed['error']}")
 
   label, confidence = _extract_hf_label_score(parsed)
   return label, confidence, parsed if isinstance(parsed, dict) else {"data": parsed}

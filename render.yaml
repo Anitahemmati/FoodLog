@@ -16,7 +16,7 @@ services:
       - key: HF_API_TOKEN
         sync: false
       - key: HF_SPACE_URL
-        value: https://huggingface.co/spaces/AnitaAnita2025/nateraw-food/+/api/predict/
+        value: https://api-inference.huggingface.co/models/nateraw/food
       - key: HF_CONFIDENCE_THRESHOLD
         value: "0.5"
       - key: HF_SPACE_TIMEOUT
