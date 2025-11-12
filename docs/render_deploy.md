@@ -23,6 +23,7 @@ Environment variables Render uses (from `render.yaml`):
 - `HF_SPACE_URL=https://router.huggingface.co/hf-inference/models/nateraw/food` – adjust if you point to a different hosted model or run your own Space/endpoint. Hugging Face بازوی api-inference را بازنشسته کرده و باید از `router.huggingface.co` استفاده کنید.
 - `HF_CONFIDENCE_THRESHOLD=0.5` – tweak if you want to require higher or lower confidence before accepting a prediction (expressed as a ratio, so 0.5 = 50 %).
 - `HF_SPACE_TIMEOUT=45` – network timeout (seconds) for the Hugging Face request.
+- `HF_REJECTION_STATUS_CODE=200` – HTTP status used when Hugging Face کم‌اعتماد است. اگر می‌خواهید رفتار REST سنتی 422 را داشته باشید این مقدار را تغییر دهید، ولی 200 باعث می‌شود فرانت‌اند بدون هندل خطا هم پیام «این غذا نیست» را ببیند.
 - TensorFlow and the training utilities are optional; runtime predictions now use synthetic data so the container no longer ships heavy ML dependencies. If you need to retrain models locally, install `tensorflow` manually before running `train_model.py`.
 
 ## 3. Deploy via Render Blueprint

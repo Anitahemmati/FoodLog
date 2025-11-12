@@ -78,6 +78,14 @@ def _normalise_confidence_value(value: float) -> float:
 HF_SPACE_URL = (os.environ.get("HF_SPACE_URL") or os.environ.get("HF_FOOD_SPACE_URL") or DEFAULT_HF_SPACE_URL).strip()
 HF_CONFIDENCE_THRESHOLD = _normalise_confidence_value(_safe_float(os.environ.get("HF_CONFIDENCE_THRESHOLD"), 0.5))
 HF_SPACE_TIMEOUT = _safe_int(os.environ.get("HF_SPACE_TIMEOUT"), 45)
+def _sanitise_status_code(value: int, default: int = 200) -> int:
+  try:
+    if 100 <= value <= 599:
+      return value
+  except TypeError:
+    pass
+  return default
+
 HF_API_TOKEN = (
   os.environ.get("HF_API_TOKEN")
   or os.environ.get("HUGGING_FACE_TOKEN")
@@ -85,6 +93,7 @@ HF_API_TOKEN = (
   or os.environ.get("HF_TOKEN")
   or ""
 ).strip()
+HF_REJECTION_STATUS_CODE = _sanitise_status_code(_safe_int(os.environ.get("HF_REJECTION_STATUS_CODE"), 200))
 
 
 class HuggingFaceSpaceError(RuntimeError):
@@ -693,13 +702,17 @@ def create_app() -> Flask:
     if hf_prediction:
       hf_label, hf_confidence, hf_payload = hf_prediction
       if hf_confidence < HF_CONFIDENCE_THRESHOLD:
-        return {
-          "error": "این غذا نیست",
+        rejection_payload = {
+          "error": "تشخیص و بررسی تصویر ارسالی ممکن نیست",
           "details": f"بالاترین اطمینان {hf_confidence * 100:.1f}% برای {hf_label}",
           "confidence": hf_confidence,
           "label": hf_label,
           "threshold": HF_CONFIDENCE_THRESHOLD,
-        }, 422
+          "status": "hf_rejected",
+          "accepted": False,
+          "http_status": HF_REJECTION_STATUS_CODE,
+        }
+        return rejection_payload, HF_REJECTION_STATUS_CODE
 
       raw_prediction = predict_calories(unique_name) or {}
       raw_prediction["food"] = hf_label
