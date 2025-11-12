@@ -49,7 +49,7 @@ USE_AWS_BACKEND = STORAGE_BACKEND == "aws"
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "change-me")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_MINUTES = int(os.environ.get("JWT_EXPIRATION_MINUTES", "60"))
-DEFAULT_HF_SPACE_URL = "https://api-inference.huggingface.co/models/nateraw/food"
+DEFAULT_HF_SPACE_URL = "https://router.huggingface.co/hf-inference/models/nateraw/food"
 
 
 def _safe_float(value: Optional[str], default: float) -> float:
@@ -148,7 +148,13 @@ def _call_hf_food_space(image_bytes: bytes) -> Tuple[str, float, Dict[str, Any]]
     raise HuggingFaceSpaceError("Hugging Face space URL is not configured.")
 
   parsed_url = urlparse(HF_SPACE_URL)
-  is_inference_endpoint = "api-inference.huggingface.co" in parsed_url.netloc
+  netloc = parsed_url.netloc.lower()
+  path = parsed_url.path or ""
+  is_inference_endpoint = (
+    "api-inference.huggingface.co" in netloc
+    or "router.huggingface.co" in netloc
+    or path.startswith("/hf-inference")
+  )
 
   headers = {}
   if HF_API_TOKEN:
