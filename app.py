@@ -20,6 +20,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from pathlib import Path
 from difflib import get_close_matches
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -101,7 +102,8 @@ def _normalise_label_key(value: Any) -> str:
   """Return a normalised lookup key for food labels."""
   if value is None:
     return ""
-  return " ".join(str(value).strip().lower().split())
+  cleaned = re.sub(r"[^a-z0-9]+", " ", str(value).strip().lower())
+  return " ".join(cleaned.split())
 
 
 def _resolve_ingredient_override(label: Any) -> List[str] | None:
@@ -114,7 +116,9 @@ def _resolve_ingredient_override(label: Any) -> List[str] | None:
   if direct:
     return direct
 
-  for candidate_key, ingredients in HF_INGREDIENT_OVERRIDES.items():
+  ordered_keys = sorted(HF_INGREDIENT_OVERRIDES.keys(), key=len, reverse=True)
+  for candidate_key in ordered_keys:
+    ingredients = HF_INGREDIENT_OVERRIDES[candidate_key]
     if candidate_key in key or key in candidate_key:
       return ingredients
 
@@ -223,6 +227,76 @@ HF_INGREDIENT_OVERRIDES: Dict[str, List[str]] = {
     "Greek Yogurt",
     "Almond Milk",
     "Chia Seeds",
+  ],
+  "pizza": [
+    "Pizza Dough",
+    "Tomato Sauce",
+    "Mozzarella Cheese",
+    "Olive Oil",
+    "Fresh Basil",
+  ],
+  "burger": [
+    "Beef Patty",
+    "Burger Bun",
+    "Cheddar Cheese",
+    "Lettuce",
+    "Tomato",
+  ],
+  "sandwich": [
+    "Whole Wheat Bread",
+    "Turkey Slices",
+    "Lettuce",
+    "Tomato",
+    "Mayonnaise",
+  ],
+  "wrap": [
+    "Flour Tortilla",
+    "Grilled Chicken",
+    "Mixed Greens",
+    "Tomato",
+    "Yogurt Sauce",
+  ],
+  "salad": [
+    "Mixed Greens",
+    "Cherry Tomatoes",
+    "Cucumber",
+    "Red Onion",
+    "Vinaigrette",
+  ],
+  "soup": [
+    "Vegetable Broth",
+    "Carrots",
+    "Celery",
+    "Onion",
+    "Parsley",
+  ],
+  "pasta": [
+    "Spaghetti",
+    "Marinara Sauce",
+    "Parmesan",
+    "Olive Oil",
+    "Garlic",
+  ],
+  "smoothie": [
+    "Banana",
+    "Mixed Berries",
+    "Greek Yogurt",
+    "Spinach",
+    "Almond Milk",
+  ],
+  "omelette": [
+    "Eggs",
+    "Cheddar Cheese",
+    "Spinach",
+    "Mushrooms",
+    "Bell Peppers",
+  ],
+  "pancakes": [
+    "Flour",
+    "Milk",
+    "Eggs",
+    "Maple Syrup",
+    "Butter",
   ],
 }
 
