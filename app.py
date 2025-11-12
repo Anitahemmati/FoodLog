@@ -345,6 +345,93 @@ HF_INGREDIENT_OVERRIDES: Dict[str, List[str]] = {
 }
 
 
+def _build_weight_map(pairs: List[Tuple[str, float]]) -> Dict[str, float]:
+  """Return a normalised ingredient-to-grams map for USDA weighting."""
+  weight_map: Dict[str, float] = {}
+  for name, grams in pairs:
+    key = _normalise_label_key(name)
+    if not key:
+      continue
+    weight_map[key] = float(grams)
+  return weight_map
+
+
+HF_INGREDIENT_WEIGHT_OVERRIDES: Dict[str, Dict[str, float]] = {
+  "grilled chicken salad": _build_weight_map(
+    [
+      ("Grilled Chicken Breast", 120.0),
+      ("Mixed Greens", 80.0),
+      ("Cherry Tomatoes", 50.0),
+      ("Cucumber", 40.0),
+      ("Balsamic Vinaigrette", 30.0),
+    ]
+  ),
+  "pepperoni pizza": _build_weight_map(
+    [
+      ("Pizza Dough", 120.0),
+      ("Tomato Sauce", 60.0),
+      ("Mozzarella Cheese", 80.0),
+      ("Pepperoni", 35.0),
+      ("Olive Oil", 10.0),
+    ]
+  ),
+  "margherita pizza": _build_weight_map(
+    [
+      ("Pizza Dough", 115.0),
+      ("Tomato Sauce", 55.0),
+      ("Fresh Mozzarella", 85.0),
+      ("Basil Leaves", 5.0),
+      ("Olive Oil", 8.0),
+    ]
+  ),
+  "burger": _build_weight_map(
+    [
+      ("Beef Patty", 110.0),
+      ("Burger Bun", 70.0),
+      ("Cheddar Cheese", 25.0),
+      ("Lettuce", 20.0),
+      ("Tomato", 25.0),
+    ]
+  ),
+  "sandwich": _build_weight_map(
+    [
+      ("Whole Wheat Bread", 60.0),
+      ("Turkey Slices", 75.0),
+      ("Lettuce", 20.0),
+      ("Tomato", 25.0),
+      ("Mayonnaise", 15.0),
+    ]
+  ),
+  "salad": _build_weight_map(
+    [
+      ("Mixed Greens", 90.0),
+      ("Cherry Tomatoes", 45.0),
+      ("Cucumber", 40.0),
+      ("Red Onion", 15.0),
+      ("Vinaigrette", 25.0),
+    ]
+  ),
+  "pasta": _build_weight_map(
+    [
+      ("Spaghetti", 140.0),
+      ("Marinara Sauce", 90.0),
+      ("Parmesan", 20.0),
+      ("Olive Oil", 10.0),
+      ("Garlic", 5.0),
+    ]
+  ),
+  "falafel wrap": _build_weight_map(
+    [
+      ("Pita Bread", 80.0),
+      ("Falafel", 70.0),
+      ("Lettuce", 20.0),
+      ("Tomato", 25.0),
+      ("Tahini Sauce", 25.0),
+    ]
+  ),
+}
+
+
 def _extract_usda_macros(food_entry: Dict[str, Any]) -> Dict[str, Any] | None:
   """Return calories/macros parsed from a USDA FoodData Central entry."""
   nutrients = food_entry.get("foodNutrients") or []
@@ -381,7 +468,7 @@ def _extract_usda_macros(food_entry: Dict[str, Any]) -> Dict[str, Any] | None:
   return macros
 
 
-def _fetch_usda_nutrition(food_label: str) -> Dict[str, Any] | None:
+def _fetch_usda_nutrition(food_label: str, *, weight_grams: float | None = None) -> Dict[str, Any] | None:
   """Query FoodData Central for nutrition facts that match the supplied label."""
   if not FDC_API_KEY:
     return None
@@ -426,6 +513,14 @@ def _fetch_usda_nutrition(food_label: str) -> Dict[str, Any] | None:
     macros = _extract_usda_macros(food)
     if not macros:
       continue
+    if weight_grams:
+      scale = max(weight_grams, 0.0) / 100.0
+      macros = {
+        "calories": int(round(macros.get("calories", 0) * scale)),
+        "proteins": int(round(macros.get("proteins", 0) * scale)),
+        "fats": int(round(macros.get("fats", 0) * scale)),
+        "carbohydrates": int(round(macros.get("carbohydrates", 0) * scale)),
+      }
     metadata = {
       "fdc_id": food.get("fdcId"),
       "description": food.get("description"),
@@ -445,6 +540,60 @@ def _fetch_usda_nutrition(food_label: str) -> Dict[str, Any] | None:
     }
 
   return None
+
+
+def _aggregate_usda_from_ingredients(food_name: str, ingredients: List[str]) -> Dict[str, Any] | None:
+  """Use per-ingredient USDA lookups when we know approximate serving weights."""
+  if not FDC_API_KEY:
+    return None
+  meal_weights = HF_INGREDIENT_WEIGHT_OVERRIDES.get(_normalise_label_key(food_name))
+  if not meal_weights:
+    return None
+
+  totals = {
+    "calories": 0,
+    "proteins": 0,
+    "fats": 0,
+    "carbohydrates": 0,
+  }
+  components: List[Dict[str, Any]] = []
+  for ingredient in ingredients:
+    weight = meal_weights.get(_normalise_label_key(ingredient))
+    if not weight:
+      continue
+    payload = _fetch_usda_nutrition(ingredient, weight_grams=weight)
+    if not payload:
+      continue
+    macros = payload.get("nutrition_facts") or {}
+    for key in totals:
+      totals[key] += int(macros.get(key, 0))
+    component_meta = payload.get("metadata") or {}
+    components.append(
+      {
+        "ingredient": ingredient,
+        "weight_grams": weight,
+        "calories": macros.get("calories"),
+        "proteins": macros.get("proteins"),
+        "fats": macros.get("fats"),
+        "carbohydrates": macros.get("carbohydrates"),
+        "fdc_id": component_meta.get("fdc_id"),
+      }
+    )
+
+  if not components:
+    return None
+
+  totals = {key: int(round(value)) for key, value in totals.items()}
+  metadata = {
+    "strategy": "ingredient_synthesis",
+    "components": components,
+    "food_label": food_name,
+  }
+  return {
+    "calories": totals["calories"],
+    "nutrition_facts": totals,
+    "metadata": metadata,
+  }
 
 
 class HuggingFaceSpaceError(RuntimeError):
@@ -1117,6 +1266,8 @@ def create_app() -> Flask:
 
     food_name, calories, ingredients, nutrition = _normalise_prediction(raw_prediction)
 
+    if usda_payload is None:
+      usda_payload = _aggregate_usda_from_ingredients(food_name, ingredients)
     if usda_payload is None:
       usda_payload = _fetch_usda_nutrition(food_name)
     if usda_payload:

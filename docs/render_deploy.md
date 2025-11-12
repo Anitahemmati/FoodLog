@@ -24,7 +24,7 @@ Environment variables Render uses (from `render.yaml`):
 - `HF_CONFIDENCE_THRESHOLD=0.5` – tweak if you want to require higher or lower confidence before accepting a prediction (expressed as a ratio, so 0.5 = 50 %).
 - `HF_SPACE_TIMEOUT=45` – network timeout (seconds) for the Hugging Face request.
 - `HF_REJECTION_STATUS_CODE=200` – HTTP status used when Hugging Face کم‌اعتماد است. اگر می‌خواهید رفتار REST سنتی 422 را داشته باشید این مقدار را تغییر دهید، ولی 200 باعث می‌شود فرانت‌اند بدون هندل خطا هم پیام «این غذا نیست» را ببیند.
-- `FDC_API_KEY` – FoodData Central (USDA) API key. وقتی این مقدار ست باشد، backend بعد از تشخیص برچسب غذا به صورت خودکار کالری و ماکروها را از USDA می‌گیرد و جایگزین اعداد تصادفی می‌کند.
+- `FDC_API_KEY` – FoodData Central (USDA) API key. وقتی این مقدار ست باشد، backend بعد از تشخیص برچسب غذا به صورت خودکار کالری و ماکروها را از USDA می‌گیرد و جایگزین اعداد تصادفی می‌کند. برای بعضی وعده‌های محبوب (مثل پیتزا یا سالاد) وزن تقریبی مواد هم تعریف شده و برای هر ماده یک درخواست جداگانه به USDA می‌رود تا مجموع دقیق‌تری محاسبه شود.
 - Optional tuning knobs:
   - `FDC_PAGE_SIZE` (پیش‌فرض 3) – تعیین می‌کند هنگام جستجوی USDA چند نتیجه بررسی شود.
   - `FDC_DATA_TYPES` – لیست کاما جدا از dataTypeها (مثلاً `Survey (FNDDS),SR Legacy`). اگر خالی بماند هر سه نوع اصلی جستجو می‌شوند.
