@@ -19,6 +19,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from pathlib import Path
+from difflib import get_close_matches
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -101,6 +102,32 @@ def _normalise_label_key(value: Any) -> str:
   if value is None:
     return ""
   return " ".join(str(value).strip().lower().split())
+
+
+def _resolve_ingredient_override(label: Any) -> List[str] | None:
+  """Return curated ingredients for labels that approximately match known meals."""
+  key = _normalise_label_key(label)
+  if not key:
+    return None
+
+  direct = HF_INGREDIENT_OVERRIDES.get(key)
+  if direct:
+    return direct
+
+  for candidate_key, ingredients in HF_INGREDIENT_OVERRIDES.items():
+    if candidate_key in key or key in candidate_key:
+      return ingredients
+
+  close_matches = get_close_matches(
+    key,
+    list(HF_INGREDIENT_OVERRIDES.keys()),
+    n=1,
+    cutoff=0.82,
+  )
+  if close_matches:
+    return HF_INGREDIENT_OVERRIDES.get(close_matches[0])
+
+  return None
 
 
 HF_INGREDIENT_OVERRIDES: Dict[str, List[str]] = {
@@ -380,8 +407,7 @@ def _normalise_prediction(raw: Dict[str, Any]) -> Tuple[str, int, List[str], Dic
   ingredients = raw.get("ingredients") or []
   if not isinstance(ingredients, list):
     ingredients = list(ingredients)
-  override_key = _normalise_label_key(food_name)
-  override_ingredients = HF_INGREDIENT_OVERRIDES.get(override_key)
+  override_ingredients = _resolve_ingredient_override(food_name)
   if override_ingredients:
     # Prefer curated ingredients when we recognise the meal label.
     ingredients = list(override_ingredients)
