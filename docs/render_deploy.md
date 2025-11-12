@@ -24,6 +24,12 @@ Environment variables Render uses (from `render.yaml`):
 - `HF_CONFIDENCE_THRESHOLD=0.5` – tweak if you want to require higher or lower confidence before accepting a prediction (expressed as a ratio, so 0.5 = 50 %).
 - `HF_SPACE_TIMEOUT=45` – network timeout (seconds) for the Hugging Face request.
 - `HF_REJECTION_STATUS_CODE=200` – HTTP status used when Hugging Face کم‌اعتماد است. اگر می‌خواهید رفتار REST سنتی 422 را داشته باشید این مقدار را تغییر دهید، ولی 200 باعث می‌شود فرانت‌اند بدون هندل خطا هم پیام «این غذا نیست» را ببیند.
+- `FDC_API_KEY` – FoodData Central (USDA) API key. وقتی این مقدار ست باشد، backend بعد از تشخیص برچسب غذا به صورت خودکار کالری و ماکروها را از USDA می‌گیرد و جایگزین اعداد تصادفی می‌کند.
+- Optional tuning knobs:
+  - `FDC_PAGE_SIZE` (پیش‌فرض 3) – تعیین می‌کند هنگام جستجوی USDA چند نتیجه بررسی شود.
+  - `FDC_DATA_TYPES` – لیست کاما جدا از dataTypeها (مثلاً `Survey (FNDDS),SR Legacy`). اگر خالی بماند هر سه نوع اصلی جستجو می‌شوند.
+  - `FDC_TIMEOUT` – مهلت (ثانیه) برای درخواست USDA.
+  - `FDC_BRAND_OWNER` – اگر صرفاً می‌خواهید نتایج برندی خاص را ببینید، نام مالک برند را مشخص کنید.
 - TensorFlow and the training utilities are optional; runtime predictions now use synthetic data so the container no longer ships heavy ML dependencies. If you need to retrain models locally, install `tensorflow` manually before running `train_model.py`.
 
 ## 3. Deploy via Render Blueprint
@@ -49,7 +55,7 @@ curl -X POST https://<your-render-subdomain>.onrender.com/auth/signup \
   -d '{"email":"demo@foodlog.app","password":"Str0ngPass!"}'
 ```
 
-For predictions, call `/predict` with `multipart/form-data`. The backend now sends the raw image to Hugging Face’s router-based inference API (so you get consistent labels/confidence as long as `HF_API_TOKEN` is set) while the nutrition macro fields stay synthetic until the dedicated ML microservice is ready.
+For predictions, call `/predict` with `multipart/form-data`. The backend now sends the raw image to Hugging Face’s router-based inference API (so you get consistent labels/confidence as long as `HF_API_TOKEN` is set) و اگر `FDC_API_KEY` را هم اضافه کنید، کالری و ماکروها مستقیماً از FoodData Central (USDA) خوانده می‌شوند؛ در غیر این صورت همان اعداد سینتتیک قبلی استفاده می‌شود.
 
 To test your token outside the app:
 ```bash

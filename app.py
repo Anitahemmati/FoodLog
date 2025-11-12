@@ -13,14 +13,15 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from pathlib import Path
 from difflib import get_close_matches
-import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -38,6 +39,8 @@ from jwt import ExpiredSignatureError, InvalidTokenError
 from api.image_metadata import extract_metadata
 from api.ml_predict import predict_calories
 from api.ml_service import MLServiceError, call_ml_service
+
+LOGGER = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOADS_DIR = Path(os.environ.get("UPLOADS_DIR", str(BASE_DIR / "uploads"))).resolve()
@@ -77,7 +80,33 @@ def _normalise_confidence_value(value: float) -> float:
   return value
 
 
-HF_SPACE_URL = (os.environ.get("HF_SPACE_URL") or os.environ.get("HF_FOOD_SPACE_URL") or DEFAULT_HF_SPACE_URL).strip()
+def _parse_csv(value: Optional[str]) -> List[str]:
+  """Return a list of comma-separated values with whitespace removed."""
+  if not value:
+    return []
+  return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _normalise_hf_url(url: Optional[str]) -> str:
+  """Rewrite deprecated Hugging Face endpoints to the router host."""
+  cleaned = (url or "").strip()
+  if not cleaned:
+    return ""
+
+  parsed = urlparse(cleaned)
+  netloc = parsed.netloc.lower()
+  path = parsed.path or ""
+  if "api-inference.huggingface.co" in netloc:
+    if path.startswith("/models/") and not path.startswith("/hf-inference"):
+      path = "/hf-inference" + path
+    elif not path.startswith("/hf-inference"):
+      path = "/hf-inference/models/nateraw/food"
+    parsed = parsed._replace(scheme="https", netloc="router.huggingface.co", path=path)
+    cleaned = parsed.geturl()
+  return cleaned
+
+
+HF_SPACE_URL = _normalise_hf_url(os.environ.get("HF_SPACE_URL") or os.environ.get("HF_FOOD_SPACE_URL") or DEFAULT_HF_SPACE_URL)
 HF_CONFIDENCE_THRESHOLD = _normalise_confidence_value(_safe_float(os.environ.get("HF_CONFIDENCE_THRESHOLD"), 0.5))
 HF_SPACE_TIMEOUT = _safe_int(os.environ.get("HF_SPACE_TIMEOUT"), 45)
 def _sanitise_status_code(value: int, default: int = 200) -> int:
@@ -96,6 +125,21 @@ HF_API_TOKEN = (
   or ""
 ).strip()
 HF_REJECTION_STATUS_CODE = _sanitise_status_code(_safe_int(os.environ.get("HF_REJECTION_STATUS_CODE"), 200))
+
+FDC_API_KEY = (
+  os.environ.get("FDC_API_KEY")
+  or os.environ.get("USDA_API_KEY")
+  or ""
+).strip()
+FDC_ENDPOINT = "https://api.nal.usda.gov/fdc/v1/foods/search"
+FDC_PAGE_SIZE = max(1, min(25, _safe_int(os.environ.get("FDC_PAGE_SIZE"), 3)))
+FDC_TIMEOUT = _safe_int(os.environ.get("FDC_TIMEOUT"), 8)
+FDC_DATA_TYPES = _parse_csv(os.environ.get("FDC_DATA_TYPES")) or [
+  "Survey (FNDDS)",
+  "SR Legacy",
+  "Branded",
+]
+FDC_BRAND_OWNER = (os.environ.get("FDC_BRAND_OWNER") or "").strip()
 
 
 def _normalise_label_key(value: Any) -> str:
@@ -299,6 +343,108 @@ HF_INGREDIENT_OVERRIDES: Dict[str, List[str]] = {
     "Butter",
   ],
 }
+
+
+def _extract_usda_macros(food_entry: Dict[str, Any]) -> Dict[str, Any] | None:
+  """Return calories/macros parsed from a USDA FoodData Central entry."""
+  nutrients = food_entry.get("foodNutrients") or []
+  values: Dict[str, float] = {}
+  for nutrient in nutrients:
+    number = str(nutrient.get("nutrientNumber") or "").strip()
+    if not number:
+      continue
+    value = nutrient.get("value")
+    try:
+      numeric_value = float(value)
+    except (TypeError, ValueError):
+      continue
+    values[number] = numeric_value
+    name = (nutrient.get("nutrientName") or "").lower()
+    if number == "" and "energy" in name and "kcal" in name:
+      values.setdefault("208", numeric_value)
+
+  calories = values.get("208")
+  if calories is None:
+    return None
+
+  def _round(value: float | None) -> int:
+    if value is None:
+      return 0
+    return int(round(value))
+
+  macros = {
+    "calories": _round(calories),
+    "proteins": _round(values.get("203")),
+    "fats": _round(values.get("204")),
+    "carbohydrates": _round(values.get("205")),
+  }
+  return macros
+
+
+def _fetch_usda_nutrition(food_label: str) -> Dict[str, Any] | None:
+  """Query FoodData Central for nutrition facts that match the supplied label."""
+  if not FDC_API_KEY:
+    return None
+  normalised_label = (food_label or "").strip()
+  if not normalised_label:
+    return None
+
+  payload: Dict[str, Any] = {
+    "query": normalised_label,
+    "pageSize": FDC_PAGE_SIZE,
+    "requireAllWords": False,
+    "sortBy": "score",
+    "sortOrder": "desc",
+  }
+  if FDC_DATA_TYPES:
+    payload["dataType"] = FDC_DATA_TYPES
+  if FDC_BRAND_OWNER:
+    payload["brandOwner"] = FDC_BRAND_OWNER
+
+  try:
+    response = requests.post(
+      FDC_ENDPOINT,
+      params={"api_key": FDC_API_KEY},
+      json=payload,
+      timeout=FDC_TIMEOUT,
+    )
+  except requests.RequestException as exc:
+    LOGGER.info("USDA nutrition lookup failed: %s", exc)
+    return None
+
+  if not response.ok:
+    LOGGER.info("USDA nutrition lookup error %s: %s", response.status_code, response.text[:120])
+    return None
+
+  try:
+    content = response.json()
+  except ValueError:
+    return None
+
+  foods = content.get("foods") or []
+  for food in foods:
+    macros = _extract_usda_macros(food)
+    if not macros:
+      continue
+    metadata = {
+      "fdc_id": food.get("fdcId"),
+      "description": food.get("description"),
+      "data_type": food.get("dataType"),
+      "brand_owner": food.get("brandOwner"),
+      "published": food.get("publicationDate"),
+      "serving_size": food.get("servingSize"),
+      "serving_unit": food.get("servingSizeUnit"),
+      "food_category": food.get("foodCategory"),
+      "score": food.get("score"),
+      "query": normalised_label,
+    }
+    return {
+      "calories": macros["calories"],
+      "nutrition_facts": macros,
+      "metadata": metadata,
+    }
+
+  return None
 
 
 class HuggingFaceSpaceError(RuntimeError):
@@ -897,6 +1043,7 @@ def create_app() -> Flask:
 
     hf_prediction: Tuple[str, float, Dict[str, Any]] | None = None
     hf_error: str | None = None
+    usda_payload: Dict[str, Any] | None = None
     if HF_SPACE_URL:
       try:
         hf_prediction = _call_hf_food_space(binary_content)
@@ -926,6 +1073,7 @@ def create_app() -> Flask:
       raw_prediction = predict_calories(unique_name) or {}
       raw_prediction["food"] = hf_label
       raw_prediction["confidence"] = hf_confidence
+      usda_payload = _fetch_usda_nutrition(hf_label)
       metadata["hf_space"] = {
         "label": hf_label,
         "confidence": hf_confidence,
@@ -968,6 +1116,16 @@ def create_app() -> Flask:
           temp_path.unlink(missing_ok=True)
 
     food_name, calories, ingredients, nutrition = _normalise_prediction(raw_prediction)
+
+    if usda_payload is None:
+      usda_payload = _fetch_usda_nutrition(food_name)
+    if usda_payload:
+      calories = usda_payload.get("calories") or calories
+      usda_macros = usda_payload.get("nutrition_facts") or {}
+      if usda_macros:
+        usda_macros.setdefault("calories", calories)
+        nutrition = usda_macros
+      metadata["usda_fdc"] = usda_payload.get("metadata", {})
 
     created_at = datetime.now(timezone.utc).isoformat()
     consumed_at = _resolve_consumed_at(raw_consumed_at, created_at)

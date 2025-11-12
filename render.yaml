@@ -21,6 +21,8 @@ services:
         value: "0.5"
       - key: HF_SPACE_TIMEOUT
         value: "45"
+      - key: FDC_API_KEY
+        sync: false
       - key: UPLOADS_DIR
         value: /data/uploads
       - key: SQLITE_DB_PATH
