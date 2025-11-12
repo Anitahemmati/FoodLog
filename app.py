@@ -223,6 +223,20 @@ HF_INGREDIENT_OVERRIDES: Dict[str, List[str]] = {
     "Pepperoni",
     "Olive Oil",
   ],
+  "hamburger": [
+    "Beef Patty",
+    "Burger Bun",
+    "Cheddar Cheese",
+    "Lettuce",
+    "Tomato",
+  ],
+  "cheeseburger": [
+    "Beef Patty",
+    "Burger Bun",
+    "Cheddar Cheese",
+    "Lettuce",
+    "Tomato",
+  ],
   "margherita pizza": [
     "Pizza Dough",
     "Tomato Sauce",
@@ -393,6 +407,24 @@ HF_INGREDIENT_WEIGHT_OVERRIDES: Dict[str, Dict[str, float]] = {
       ("Tomato", 25.0),
     ]
   ),
+  "hamburger": _build_weight_map(
+    [
+      ("Beef Patty", 110.0),
+      ("Burger Bun", 70.0),
+      ("Cheddar Cheese", 25.0),
+      ("Lettuce", 20.0),
+      ("Tomato", 25.0),
+    ]
+  ),
+  "cheeseburger": _build_weight_map(
+    [
+      ("Beef Patty", 120.0),
+      ("Burger Bun", 70.0),
+      ("Cheddar Cheese", 35.0),
+      ("Lettuce", 15.0),
+      ("Tomato", 20.0),
+    ]
+  ),
   "sandwich": _build_weight_map(
     [
       ("Whole Wheat Bread", 60.0),
@@ -513,6 +545,7 @@ def _fetch_usda_nutrition(food_label: str, *, weight_grams: float | None = None)
     macros = _extract_usda_macros(food)
     if not macros:
       continue
+    portion_weight = None
     if weight_grams:
       scale = max(weight_grams, 0.0) / 100.0
       macros = {
@@ -521,6 +554,19 @@ def _fetch_usda_nutrition(food_label: str, *, weight_grams: float | None = None)
         "fats": int(round(macros.get("fats", 0) * scale)),
         "carbohydrates": int(round(macros.get("carbohydrates", 0) * scale)),
       }
+      portion_weight = weight_grams
+    else:
+      serving_size = food.get("servingSize")
+      serving_unit = (food.get("servingSizeUnit") or "").strip().lower()
+      try:
+        serving_value = float(serving_size)
+      except (TypeError, ValueError):
+        serving_value = None
+      if serving_value is not None:
+        if serving_unit in {"g", "gram", "grams"}:
+          portion_weight = serving_value
+        elif serving_unit in {"oz", "ounce", "ounces"}:
+          portion_weight = serving_value * 28.3495
     metadata = {
       "fdc_id": food.get("fdcId"),
       "description": food.get("description"),
@@ -532,11 +578,14 @@ def _fetch_usda_nutrition(food_label: str, *, weight_grams: float | None = None)
       "food_category": food.get("foodCategory"),
       "score": food.get("score"),
       "query": normalised_label,
+      "serving_size": food.get("servingSize"),
+      "serving_size_unit": food.get("servingSizeUnit"),
     }
     return {
       "calories": macros["calories"],
       "nutrition_facts": macros,
       "metadata": metadata,
+      "weight_grams": portion_weight,
     }
 
   return None
@@ -556,6 +605,7 @@ def _aggregate_usda_from_ingredients(food_name: str, ingredients: List[str]) -> 
     "fats": 0,
     "carbohydrates": 0,
   }
+  total_weight = 0.0
   components: List[Dict[str, Any]] = []
   for ingredient in ingredients:
     weight = meal_weights.get(_normalise_label_key(ingredient))
@@ -567,6 +617,7 @@ def _aggregate_usda_from_ingredients(food_name: str, ingredients: List[str]) -> 
     macros = payload.get("nutrition_facts") or {}
     for key in totals:
       totals[key] += int(macros.get(key, 0))
+    total_weight += weight
     component_meta = payload.get("metadata") or {}
     components.append(
       {
@@ -593,6 +644,7 @@ def _aggregate_usda_from_ingredients(food_name: str, ingredients: List[str]) -> 
     "calories": totals["calories"],
     "nutrition_facts": totals,
     "metadata": metadata,
+    "weight_grams": total_weight if total_weight else None,
   }
 
 
@@ -1222,7 +1274,6 @@ def create_app() -> Flask:
       raw_prediction = predict_calories(unique_name) or {}
       raw_prediction["food"] = hf_label
       raw_prediction["confidence"] = hf_confidence
-      usda_payload = _fetch_usda_nutrition(hf_label)
       metadata["hf_space"] = {
         "label": hf_label,
         "confidence": hf_confidence,
