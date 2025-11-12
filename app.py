@@ -96,6 +96,110 @@ HF_API_TOKEN = (
 HF_REJECTION_STATUS_CODE = _sanitise_status_code(_safe_int(os.environ.get("HF_REJECTION_STATUS_CODE"), 200))
 
 
+def _normalise_label_key(value: Any) -> str:
+  """Return a normalised lookup key for food labels."""
+  if value is None:
+    return ""
+  return " ".join(str(value).strip().lower().split())
+
+
+HF_INGREDIENT_OVERRIDES: Dict[str, List[str]] = {
+  # Core templates (kept in sync with synthetic fallback).
+  "grilled chicken salad": [
+    "Grilled Chicken Breast",
+    "Mixed Greens",
+    "Cherry Tomatoes",
+    "Cucumber",
+    "Balsamic Vinaigrette",
+  ],
+  "veggie power bowl": [
+    "Quinoa",
+    "Roasted Sweet Potato",
+    "Black Beans",
+    "Avocado",
+    "Lime Dressing",
+  ],
+  "salmon sushi roll": [
+    "Sushi Rice",
+    "Fresh Salmon",
+    "Nori",
+    "Cucumber",
+    "Soy Sauce",
+  ],
+  "mediterranean wrap": [
+    "Whole Wheat Tortilla",
+    "Hummus",
+    "Feta Cheese",
+    "Kalamata Olives",
+    "Spinach",
+  ],
+  "spaghetti bolognese": [
+    "Spaghetti",
+    "Tomato Sauce",
+    "Ground Beef",
+    "Parmesan Cheese",
+    "Basil",
+  ],
+  # Additional common meals.
+  "pepperoni pizza": [
+    "Pizza Dough",
+    "Tomato Sauce",
+    "Mozzarella Cheese",
+    "Pepperoni",
+    "Olive Oil",
+  ],
+  "margherita pizza": [
+    "Pizza Dough",
+    "Tomato Sauce",
+    "Fresh Mozzarella",
+    "Basil Leaves",
+    "Olive Oil",
+  ],
+  "caesar salad": [
+    "Romaine Lettuce",
+    "Grilled Chicken",
+    "Parmesan Shavings",
+    "Croutons",
+    "Caesar Dressing",
+  ],
+  "chicken burrito": [
+    "Flour Tortilla",
+    "Grilled Chicken",
+    "Rice",
+    "Black Beans",
+    "Salsa",
+  ],
+  "falafel wrap": [
+    "Pita Bread",
+    "Falafel",
+    "Lettuce",
+    "Tomato",
+    "Tahini Sauce",
+  ],
+  "avocado toast": [
+    "Sourdough Bread",
+    "Mashed Avocado",
+    "Cherry Tomatoes",
+    "Olive Oil",
+    "Sea Salt",
+  ],
+  "greek yogurt parfait": [
+    "Greek Yogurt",
+    "Granola",
+    "Honey",
+    "Blueberries",
+    "Almonds",
+  ],
+  "fruit smoothie": [
+    "Banana",
+    "Mixed Berries",
+    "Greek Yogurt",
+    "Almond Milk",
+    "Chia Seeds",
+  ],
+}
+
+
 class HuggingFaceSpaceError(RuntimeError):
   """Raised when Hugging Face classification cannot be completed."""
 
@@ -276,6 +380,11 @@ def _normalise_prediction(raw: Dict[str, Any]) -> Tuple[str, int, List[str], Dic
   ingredients = raw.get("ingredients") or []
   if not isinstance(ingredients, list):
     ingredients = list(ingredients)
+  override_key = _normalise_label_key(food_name)
+  override_ingredients = HF_INGREDIENT_OVERRIDES.get(override_key)
+  if override_ingredients:
+    # Prefer curated ingredients when we recognise the meal label.
+    ingredients = list(override_ingredients)
 
   nutrition = raw.get("nutrition_facts")
   if not isinstance(nutrition, dict):
